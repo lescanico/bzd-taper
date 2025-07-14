@@ -216,7 +216,9 @@ def create_bzd_taper_plan(starting_medication, starting_dose_mg, taper_speed,
 def format_patient_instructions(schedule):
     instructions = [
         "⚠️ Do not change this schedule without consulting your prescriber.",
-        "📆 Tapering Schedule:", ""
+        "📆 Tapering Schedule:",
+        "",
+        "This schedule follows the ASAM Benzodiazepine Tapering Guideline, 2025: https://downloads.asam.org/sitefinity-production-blobs/docs/default-source/guidelines/benzodiazepine-tapering-2025/bzd-tapering-document---final-approved-version-for-distribution-02-28-25.pdf?sfvrsn=5bdf9c81_4"
     ]
     for s in schedule:
         line = f"{s['week_label']} ({s['start_date'].strftime('%b %d, %Y')} to {s['end_date'].strftime('%b %d, %Y')}):"
@@ -231,7 +233,7 @@ def format_patient_instructions(schedule):
 
 
 def format_ehr_summary(schedule, total_days):
-    return f"Patient will taper off diazepam over {total_days} days using a {len(schedule)}-step protocol, ending at 0.5 mg daily per the February 28, 2025 Joint Clinical Practice Guideline."
+    return f"Patient will taper off diazepam over {total_days} days using a {len(schedule)}-step protocol, ending at 0.5 mg daily per the February 28, 2025 Joint Clinical Practice Guideline. This schedule follows the ASAM Benzodiazepine Tapering Guideline, 2025: https://downloads.asam.org/sitefinity-production-blobs/docs/default-source/guidelines/benzodiazepine-tapering-2025/bzd-tapering-document---final-approved-version-for-distribution-02-28-25.pdf?sfvrsn=5bdf9c81_4"
 
 
 def format_pharmacy_orders(schedule):

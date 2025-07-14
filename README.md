@@ -1,3 +1,5 @@
+> **This tool generates benzodiazepine tapering schedules according to the [ASAM Benzodiazepine Tapering Guideline, 2025](https://downloads.asam.org/sitefinity-production-blobs/docs/default-source/guidelines/benzodiazepine-tapering-2025/bzd-tapering-document---final-approved-version-for-distribution-02-28-25.pdf?sfvrsn=5bdf9c81_4).**
+
 # Benzodiazepine Taper Generator Web App
 
 A web-based application for generating safe, evidence-based benzodiazepine tapering schedules according to clinical guidelines.
@@ -10,6 +12,9 @@ A web-based application for generating safe, evidence-based benzodiazepine taper
 - **Professional Output**: Patient instructions, EHR summaries, and pharmacy orders
 - **Modern UI**: Responsive design with intuitive user interface
 - **Export Options**: Print, PDF, and CSV export capabilities
+
+## About the Guideline
+This application is based on the [ASAM Benzodiazepine Tapering Guideline, 2025](https://downloads.asam.org/sitefinity-production-blobs/docs/default-source/guidelines/benzodiazepine-tapering-2025/bzd-tapering-document---final-approved-version-for-distribution-02-28-25.pdf?sfvrsn=5bdf9c81_4), which provides evidence-based recommendations for safe benzodiazepine tapering, including dose reduction percentages, intervals, and conversion ratios.
 
 ## Installation
 
