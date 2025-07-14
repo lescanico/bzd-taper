@@ -1,14 +1,34 @@
-from datetime import timedelta, date
+#!/usr/bin/env python3
+"""
+taper_gen.py
+============
+
+Generate diazepam-based taper schedules that comply with the 2025
+ASAM guideline.  Produces patient instructions, pharmacy orders,
+EHR summary and pill counts.
+
+Run as a module::
+
+    python taper_gen.py --med clonazepam --dose 1 --speed slow \
+                        --start 2025-07-15 --final-hold 6 3
+"""
+from __future__ import annotations
+
+import argparse
+import math
 from collections import defaultdict
-import datetime
+from dataclasses import dataclass
+from datetime import date, timedelta
+from typing import Dict, List, Tuple, TypedDict
 
-TAPER_SPEEDS = {
-    "slow": {"percent": 2.5, "interval_days": 28},
-    "standard": {"percent": 5.0, "interval_days": 21},
-    "fast": {"percent": 10.0, "interval_days": 14},
-}
+# ───────────────────────────────────────────────────────────── constants ──
+ASAM_GUIDELINE_URL = (
+    "https://downloads.asam.org/sitefinity-production-blobs/docs/default-source/"
+    "guidelines/benzodiazepine-tapering-2025/bzd-tapering-document---final-approved-"
+    "version-for-distribution-02-28-25.pdf?sfvrsn=5bdf9c81_4"
+)
 
-EQUIVALENTS_TO_DIAZEPAM_MG = {
+EQUIVALENTS_TO_DIAZEPAM_MG: Dict[str, float] = {
     "alprazolam": 0.5,
     "clonazepam": 0.5,
     "lorazepam": 1.0,
@@ -18,313 +38,271 @@ EQUIVALENTS_TO_DIAZEPAM_MG = {
     "diazepam": 10.0,
 }
 
-AVAILABLE_STRENGTHS = {
+AVAILABLE_STRENGTHS: Dict[str, List[float]] = {
     "diazepam": [10.0, 5.0, 2.0],
     "clonazepam": [2.0, 1.0, 0.5],
     "alprazolam": [2.0, 1.0, 0.5, 0.25],
 }
 
+class SpeedConfig(TypedDict):
+    label: str
+    percent: float
+    interval: int
 
-def convert_to_diazepam(dose_mg, med_name):
-    med_name = med_name.lower()
-    if med_name not in EQUIVALENTS_TO_DIAZEPAM_MG:
-        raise ValueError(f"Unsupported medication: {med_name}. Must be converted to diazepam before tapering.")
-    ratio = 10.0 / EQUIVALENTS_TO_DIAZEPAM_MG[med_name]
+SPEED_TABLE: List[SpeedConfig] = [
+    {"label": "slow",        "percent": 2.5,  "interval": 28},
+    {"label": "standard",    "percent": 5.0,  "interval": 21},
+    {"label": "fast",        "percent": 10.0, "interval": 14},
+    {"label": "very fast",   "percent": 15.0, "interval": 14},
+    {"label": "ultra fast",  "percent": 20.0, "interval": 7},
+]
+
+# ───────────────────────────────────────────────────────────── helpers ────
+def _format_tablet_count(n: float) -> str:
+    """Pretty-print 0.5 as the half-tablet glyph."""
+    return "½" if math.isclose(n, 0.5, abs_tol=1e-3) else str(int(n))
+
+
+def _even_split(total: float, parts: int) -> List[float]:
+    base = round(total / parts, 2)
+    chunks = [base] * parts
+    chunks[-1] += round(total - sum(chunks), 2)
+    return chunks
+
+
+def convert_to_diazepam(dose_mg: float, med: str) -> float:
+    med = med.lower()
+    if med not in EQUIVALENTS_TO_DIAZEPAM_MG:
+        raise ValueError(f"Medication '{med}' not in equivalency table.")
+    ratio = 10.0 / EQUIVALENTS_TO_DIAZEPAM_MG[med]
     return round(dose_mg * ratio, 2)
 
 
-def even_split(total, parts):
-    base = round(total / parts, 2)
-    split = [base] * parts
-    split[-1] += round(total - sum(split), 2)
-    return split
-
-
-def can_achieve(dose, med_name):
-    combo = get_pill_combination(dose, med_name)
-    achieved = round(sum(k * v for k, v in combo.items()), 2)
-    return achieved == dose
-
-
-def get_pill_combination(dose_mg, med_name="diazepam"):
-    strengths = sorted(AVAILABLE_STRENGTHS[med_name], reverse=True)
-    remaining = dose_mg
-    combo = {}
-
+def _pill_combo(dose: float, med: str = "diazepam") -> Dict[float, float]:
+    strengths = sorted(AVAILABLE_STRENGTHS[med], reverse=True)
+    remaining, combo = dose, {}
     for s in strengths:
-        count = int(remaining // s)
-        if count > 0:
-            combo[s] = count
-            remaining = round(remaining - count * s, 2)
-
+        qty = int(remaining // s)
+        if qty:
+            combo[s] = qty
+            remaining = round(remaining - qty * s, 2)
     if 0 < remaining < min(strengths):
         closest = min(strengths, key=lambda x: abs(x - remaining))
         combo[closest] = combo.get(closest, 0) + 0.5
-
     return combo
 
 
-def assign_split_doses(dose_mg, med_name, frequency):
-    freq_map = {"once": 1, "bid": 2, "tid": 3}
-    parts = freq_map[frequency]
-    doses = even_split(dose_mg, parts)
+def _can_make(dose: float, med: str) -> bool:
+    target = round(sum(k * v for k, v in _pill_combo(dose, med).items()), 2)
+    return math.isclose(target, dose, abs_tol=0.01)
+
+
+def _assign_split(dose: float, med: str, freq: str) -> Dict[str, Dict[float, float]]:
+    parts = {"once": 1, "bid": 2, "tid": 3}[freq]
     times = ["AM", "PM", "HS"][:parts]
-    schedule = {}
-    for time, d in zip(times, doses):
-        schedule[time] = get_pill_combination(d, med_name)
-    return schedule
+    return {t: _pill_combo(d, med) for t, d in zip(times, _even_split(dose, parts))}
 
 
-def split_dose(dose_mg, med_name="diazepam", frequency="auto"):
-    if frequency == "auto":
-        once_combo = get_pill_combination(dose_mg, med_name)
-        if dose_mg == round(sum(k * v for k, v in once_combo.items()), 2):
-            return assign_split_doses(dose_mg, med_name, "once"), "once"
+def _split_dose(dose: float, med: str = "diazepam", freq: str = "auto"
+                ) -> Tuple[Dict[str, Dict[float, float]], str]:
+    if freq != "auto":
+        return _assign_split(dose, med, freq), freq
+    if _can_make(dose, med):
+        return _assign_split(dose, med, "once"), "once"
+    for option, parts in (("bid", 2), ("tid", 3)):
+        if all(_can_make(d, med) for d in _even_split(dose, parts)):
+            return _assign_split(dose, med, option), option
+    return _assign_split(dose, med, "tid"), "tid"
 
-        for option in ["bid", "tid"]:
-            doses = even_split(dose_mg, {"bid": 2, "tid": 3}[option])
-            if all(can_achieve(d, med_name) for d in doses):
-                return assign_split_doses(dose_mg, med_name, option), option
+# ───────────────────────────────────────────────────────────── dataclass ──
+@dataclass(frozen=True)
+class TaperStep:
+    dose_mg: float
+    duration: int
+    start_day: int
+    end_day: int
+    start_date: date
+    end_date: date
+    frequency: str
+    schedule: Dict[str, Dict[float, float]]
+    note: str | None = None
 
-        return assign_split_doses(dose_mg, med_name, "tid"), "tid"
-    else:
-        return assign_split_doses(dose_mg, med_name, frequency), frequency
+    @property
+    def label(self) -> str:
+        return f"Days {self.start_day}–{self.end_day}"
 
-
-def generate_percent_taper_schedule(
-    diazepam_dose_mg,
-    taper_speed="standard",
-    min_dose_mg=0.5,
-    round_to=0.5,
-    final_hold_days=None,
-    final_hold_frequency_days=None,
-    start_date=date.today(),
-    dosing_frequency="auto",
-):
-    # Define possible taper speeds and intervals for auto-adjustment
-    speed_options = [
-        {"percent": 2.5, "interval_days": 28, "label": "slow"},
-        {"percent": 5.0, "interval_days": 21, "label": "standard"},
-        {"percent": 10.0, "interval_days": 14, "label": "fast"},
-        {"percent": 15.0, "interval_days": 14, "label": "very fast"},
-        {"percent": 20.0, "interval_days": 7, "label": "ultra fast"},
-    ]
-    # Start with the requested speed
-    initial_speed = next((s for s in speed_options if s["label"] == taper_speed), speed_options[1])
-    speed_idx = speed_options.index(initial_speed)
-    max_steps = 50  # Prevent runaway schedules
-    warning = None
-    while speed_idx < len(speed_options):
-        percent = speed_options[speed_idx]["percent"]
-        interval_days = speed_options[speed_idx]["interval_days"]
-        schedule = []
-        current_dose = diazepam_dose_mg
-        current_day = int(1)
-        current_date = start_date
-        week_number = int(1)
-        step_count = 0
+# ───────────────────────────────────────────────────────────── engine ─────
+def generate_schedule(
+    diazepam_start_mg: float,
+    speed: str,
+    *,
+    min_mg: float = 0.5,
+    round_to: float = 0.5,
+    final_hold: Tuple[int, int] | None = None,
+    start: date = date.today(),
+    freq: str = "auto",
+    max_steps: int = 50,
+) -> Tuple[List[TaperStep], int, str | None]:
+    i_speed = next(i for i, s in enumerate(SPEED_TABLE) if s["label"] == speed)
+    warn: str | None = None
+    steps: List[TaperStep] = []
+    
+    while i_speed < len(SPEED_TABLE):
+        pct, interval = SPEED_TABLE[i_speed]["percent"], SPEED_TABLE[i_speed]["interval"]
+        steps = []
+        dose, day, cur = diazepam_start_mg, 1, start
         try:
-            while current_dose > min_dose_mg:
-                step_count += 1
-                if step_count > max_steps:
-                    raise ValueError(f"Taper schedule would take more than {max_steps} steps.")
-                # Proactive date overflow check
-                max_days = (datetime.date.max - current_date).days
-                if (interval_days - 1) > max_days:
-                    raise ValueError("Taper schedule end date exceeds supported range.")
-                dose = round(current_dose, 2)
-                dosing_schedule, actual_freq = split_dose(dose, frequency=dosing_frequency)
-                end_date = current_date + timedelta(days=interval_days - 1)
-                step = {
-                    "dose_mg": dose,
-                    "duration_days": interval_days,
-                    "start_day": current_day,
-                    "end_day": current_day + interval_days - 1,
-                    "start_date": current_date,
-                    "end_date": end_date,
-                    "week_label": f"Weeks {int(week_number)}–{int(week_number + int(interval_days // 7) - 1)}",
-                    "dosing_frequency": actual_freq,
-                    "dosing_schedule": dosing_schedule,
-                }
-                schedule.append(step)
-                reduction = current_dose * (percent / 100)
-                current_dose = max(current_dose - reduction, min_dose_mg)
-                current_dose = round(round_to * round(current_dose / round_to), 2)
-                current_day += int(interval_days)
-                # Proactive date overflow check for next step
-                max_days_next = (datetime.date.max - current_date).days
-                if interval_days > max_days_next:
-                    raise ValueError("Taper schedule date increment exceeds supported range.")
-                current_date = current_date + timedelta(days=interval_days)
-                if current_date.year > 2100:
-                    raise ValueError("Taper schedule exceeds year 2100.")
-                week_number += int(interval_days // 7)
-                week_number = int(week_number)
-            # If we get here, the schedule fits within max_steps
-            break
-        except ValueError as e:
-            if "more than" in str(e):
-                # Try next faster speed
-                speed_idx += 1
-                warning = f"Taper speed was automatically increased to '{speed_options[speed_idx-1]['label']}' to keep the schedule realistic (≤{max_steps} steps)."
-                continue
-            else:
-                raise e
-    else:
-        # If all speeds fail, use the fastest and warn
-        warning = f"Could not fit taper within {max_steps} steps, used fastest schedule ('{speed_options[-1]['label']}')."
-    # Final step (same as before)
-    final_schedule, actual_freq = split_dose(min_dose_mg, frequency=dosing_frequency)
-    # Check date overflow for final step
-    max_days_final = (datetime.date.max - current_date).days
-    if (interval_days - 1) > max_days_final:
-        raise ValueError("Final taper step would exceed supported date range.")
-    schedule.append({
-        "dose_mg": min_dose_mg,
-        "duration_days": interval_days,
-        "start_day": current_day,
-        "end_day": current_day + interval_days - 1,
-        "start_date": current_date,
-        "end_date": current_date + timedelta(days=interval_days - 1),
-        "note": "final daily dose",
-        "week_label": f"Weeks {int(week_number)}–{int(week_number + int(interval_days // 7) - 1)}",
-        "dosing_frequency": actual_freq,
-        "dosing_schedule": final_schedule,
-    })
-    current_day += int(interval_days)
-    current_date += timedelta(days=interval_days)
-    week_number += int(interval_days // 7)
-    week_number = int(week_number)
-    if final_hold_days and final_hold_frequency_days:
-        # Check date overflow for final hold
-        max_days_hold = (datetime.date.max - current_date).days
-        if (final_hold_days - 1) > max_days_hold:
-            raise ValueError("Final hold period would exceed supported date range.")
-        schedule.append({
-            "dose_mg": min_dose_mg,
-            "duration_days": final_hold_days,
-            "frequency_days": final_hold_frequency_days,
-            "start_day": current_day,
-            "end_day": current_day + final_hold_days - 1,
-            "start_date": current_date,
-            "end_date": current_date + timedelta(days=final_hold_days - 1),
-            "note": f"final hold every {final_hold_frequency_days} days",
-            "week_label": f"Weeks {int(week_number)}–{int(week_number + int(final_hold_days // 7))}",
-            "dosing_frequency": actual_freq,
-            "dosing_schedule": final_schedule,
-        })
-    total_days = schedule[-1]["end_day"]
-    return schedule, total_days, warning
+            while dose > min_mg + 1e-3:
+                if len(steps) >= max_steps:
+                    raise RuntimeError("too_many_steps")
+                if cur.toordinal() + interval - 1 >= date.max.toordinal():
+                    raise RuntimeError("date_overflow")
 
+                sched, f = _split_dose(dose, freq=freq)
+                steps.append(
+                    TaperStep(
+                        dose, interval, day, day + interval - 1,
+                        cur, cur + timedelta(days=interval - 1), f, sched)
+                )
+                # Calculate new dose with proper rounding
+                new_dose = dose - (dose * pct / 100)
+                rounded_dose = max(round(round_to * round(new_dose / round_to), 2), min_mg)
+                # Ensure dose always decreases
+                if math.isclose(rounded_dose, dose, abs_tol=1e-3):
+                    if dose - round_to > min_mg:
+                        rounded_dose = round(dose - round_to, 2)
+                    else:
+                        rounded_dose = min_mg
+                dose = rounded_dose
+                day += interval
+                cur += timedelta(days=interval)
 
-def create_bzd_taper_plan(starting_medication, starting_dose_mg, taper_speed,
-                          round_to=0.5, final_hold_days=None, final_hold_frequency_days=None,
-                          start_date=date.today(), dosing_frequency="auto", verbose=False):
-    med_name = starting_medication.lower()
-    if med_name != "diazepam":
-        if verbose:
-            print("\n⚠️ Per guideline, taper must be done using diazepam.")
-        converted_dose = convert_to_diazepam(starting_dose_mg, med_name)
-        if verbose:
-            print(f"{starting_dose_mg} mg {starting_medication.title()} ≈ {converted_dose} mg diazepam")
-    else:
-        converted_dose = starting_dose_mg
+            # final plateau (only if not duplicate)
+            if not math.isclose(steps[-1].dose_mg, min_mg, abs_tol=1e-3):
+                sched, f = _split_dose(min_mg, freq=freq)
+                steps.append(
+                    TaperStep(min_mg, interval, day, day + interval - 1,
+                              cur, cur + timedelta(days=interval - 1), f, sched, "final daily dose")
+                )
+                day += interval
+                cur += timedelta(days=interval)
 
-    taper_schedule, total_days, warning = generate_percent_taper_schedule(
-        diazepam_dose_mg=converted_dose,
-        taper_speed=taper_speed,
-        round_to=round_to,
-        final_hold_days=final_hold_days,
-        final_hold_frequency_days=final_hold_frequency_days,
-        start_date=start_date,
-        dosing_frequency=dosing_frequency
-    )
+            # optional final-hold
+            if final_hold:
+                hold_days, every_n = final_hold
+                sched, f = _split_dose(min_mg, freq=freq)
+                steps.append(
+                    TaperStep(min_mg, hold_days, day, day + hold_days - 1,
+                              cur, cur + timedelta(days=hold_days - 1), f, sched,
+                              f"final hold every {every_n} days")
+                )
+            return steps, steps[-1].end_day, warn
 
-    return taper_schedule, total_days, warning
+        except RuntimeError:
+            i_speed += 1
+            if i_speed < len(SPEED_TABLE):
+                warn = f"Auto-accelerated taper to '{SPEED_TABLE[i_speed]['label']}' to remain ≤ {max_steps} steps."
+            continue
 
+    # exhausted ladder - return empty steps with warning
+    return [], 0, "Used fastest speed but schedule still long."
 
-def format_patient_instructions(schedule):
-    instructions = [
-        "⚠️ Do not change this schedule without consulting your prescriber.",
-        "📆 Tapering Schedule:",
+# ───────────────────────────────────────────────────────────── presentation layer ─
+def patient_instructions(steps: List[TaperStep]) -> List[str]:
+    txt = [
+        "⚠️  Do not alter this schedule without prescriber approval.",
+        "📆  Benzodiazepine taper plan",
         "",
-        "This schedule follows the ASAM Benzodiazepine Tapering Guideline, 2025: https://downloads.asam.org/sitefinity-production-blobs/docs/default-source/guidelines/benzodiazepine-tapering-2025/bzd-tapering-document---final-approved-version-for-distribution-02-28-25.pdf?sfvrsn=5bdf9c81_4"
+        f"Guideline reference: {ASAM_GUIDELINE_URL}",
     ]
-    for s in schedule:
-        line = f"{s['week_label']} ({s['start_date'].strftime('%b %d, %Y')} to {s['end_date'].strftime('%b %d, %Y')}):"
-        instructions.append(line)
-        for time, combo in s["dosing_schedule"].items():
-            dose_str = " + ".join([f"{v} × {k}mg" for k, v in combo.items()])
-            instructions.append(f"  • {time}: {dose_str}")
-        if "note" in s:
-            instructions.append(f"  → Note: {s['note']}")
-    instructions.append("\nIf you experience any withdrawal symptoms, contact your provider immediately.")
-    return instructions
+    for s in steps:
+        txt.append(f"{s.label} ({s.start_date:%b %d %Y} → {s.end_date:%b %d %Y}):")
+        for t, combo in s.schedule.items():
+            dose_str = " + ".join(f"{_format_tablet_count(q)} × {strg} mg" for strg, q in combo.items())
+            txt.append(f"  • {t}: {dose_str}")
+        if s.note:
+            txt.append(f"  → {s.note}")
+    txt.append("\nReport withdrawal symptoms to your provider immediately.")
+    return txt
 
 
-def format_ehr_summary(schedule, total_days):
-    return f"Patient will taper off diazepam over {total_days} days using a {len(schedule)}-step protocol, ending at 0.5 mg daily per the February 28, 2025 Joint Clinical Practice Guideline. This schedule follows the ASAM Benzodiazepine Tapering Guideline, 2025: https://downloads.asam.org/sitefinity-production-blobs/docs/default-source/guidelines/benzodiazepine-tapering-2025/bzd-tapering-document---final-approved-version-for-distribution-02-28-25.pdf?sfvrsn=5bdf9c81_4"
+def ehr_summary(steps: List[TaperStep], total_days: int) -> str:
+    return (f"Diazepam taper: {len(steps)} steps over {total_days} days, "
+            f"ending at 0.5 mg daily (Feb 28 2025 guideline). Ref: {ASAM_GUIDELINE_URL}")
 
 
-def format_pharmacy_orders(schedule):
-    orders = []
-    for s in schedule:
-        for time, combo in s["dosing_schedule"].items():
-            time_phrase = {
-                "AM": "in the morning",
-                "PM": "in the afternoon",
-                "HS": "in the evening"
-            }.get(time, f"at {time}")
-            total_days = s["duration_days"]
-
-            for strength_mg, count_per_dose in combo.items():
-                dose_phrase = f"Take {count_per_dose:.1f} tablet{'s' if count_per_dose != 1 else ''} by mouth {time_phrase}"
-                total_dispense = int(round(count_per_dose * total_days))
+def pharmacy_orders(steps: List[TaperStep]) -> List[Dict[str, str]]:
+    orders: List[Dict[str, str]] = []
+    phr = {"AM": "in the morning", "PM": "in the afternoon", "HS": "in the evening"}
+    for s in steps:
+        for t, combo in s.schedule.items():
+            for strength, q in combo.items():
+                disp_each = math.ceil(q)       # count whole tablets
+                dispense = disp_each * s.duration
+                sig = (f"Take {_format_tablet_count(q)} tablet"
+                       f"{'' if math.isclose(q,1,abs_tol=1e-3) else 's'} "
+                       f"by mouth {phr.get(t,t.lower())}")
                 orders.append({
-                    "date": s["start_date"].strftime("%B %d, %Y"),
-                    "product": f"Diazepam {strength_mg} mg tablets",
-                    "sig": f"Sig: {dose_phrase}",
-                    "dispense": f"Disp: {total_dispense} tablets for {total_days} days"
+                    "date": f"{s.start_date:%B %d %Y}",
+                    "product": f"Diazepam {strength} mg tablet",
+                    "sig": f"Sig: {sig}",
+                    "disp": f"Disp: {dispense} tablets for {s.duration} days",
                 })
     return orders
 
 
-def summarize_total_pills(schedule):
-    total_pills = defaultdict(float)
-    for step in schedule:
-        duration = step["duration_days"]
-        for combo in step["dosing_schedule"].values():
-            for strength, count_per_dose in combo.items():
-                total_pills[strength] += count_per_dose * duration
-    return dict(sorted(total_pills.items(), reverse=True))
+def pill_totals(steps: List[TaperStep]) -> Dict[float, int]:
+    total: defaultdict[float, int] = defaultdict(int)
+    for s in steps:
+        for combo in s.schedule.values():
+            for strg, q in combo.items():
+                total[strg] += math.ceil(q) * s.duration
+    return dict(sorted(total.items(), reverse=True))
 
+# ────────────────────────────────────────────────────────── CLI / demo ──
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate benzodiazepine taper")
+    parser.add_argument("--med",      required=True, help="starting medication (e.g. clonazepam)")
+    parser.add_argument("--dose",     required=True, type=float, help="starting dose in mg")
+    parser.add_argument("--speed",    choices=[s["label"] for s in SPEED_TABLE],
+                        default="standard", help="taper speed")
+    parser.add_argument("--start",    type=lambda d: date.fromisoformat(d),
+                        default=date.today(), help="start date YYYY-MM-DD")
+    parser.add_argument("--final-hold", nargs=2, metavar=("DAYS", "EVERY_N"),
+                        type=int, help="e.g. 6 3  →  6 days hold, dose every 3 days")
+    args = parser.parse_args()
 
-if __name__ == "__main__":
-    plan, duration, warning = create_bzd_taper_plan(
-        starting_medication="clonazepam",
-        starting_dose_mg=1.0,
-        taper_speed="slow",
-        final_hold_days=6,
-        final_hold_frequency_days=3,
-        start_date=date(2025, 7, 15),
-        dosing_frequency="auto"
+    diaz = (convert_to_diazepam(args.dose, args.med)
+            if args.med.lower() != "diazepam" else args.dose)
+
+    steps, total_days, warn = generate_schedule(
+        diazepam_start_mg=diaz,
+        speed=args.speed,
+        start=args.start,
+        final_hold=tuple(args.final_hold) if args.final_hold else None,
     )
 
-    if warning:
-        print(f"\n⚠️  {warning}")
+    if warn:
+        print("⚠️ ", warn, "\n")
 
-    print("\n🧑‍⚕️ PATIENT INSTRUCTIONS:")
-    for line in format_patient_instructions(plan):
-        print(line)
+    if not steps:
+        print("❌ No valid taper schedule could be generated.")
+        return
 
-    print("\n📄 EHR SUMMARY:")
-    print(format_ehr_summary(plan, duration))
+    print("🧑‍⚕️  PATIENT INSTRUCTIONS\n──────────────────────────")
+    for ln in patient_instructions(steps):
+        print(ln)
 
-    print("\n💊 PHARMACY ORDERS:")
-    for item in format_pharmacy_orders(plan):
-        print(f"Date: {item['date']}\n  {item['product']}\n  {item['sig']}\n  {item['dispense']}\n")
+    print("\n📄  EHR SUMMARY\n──────────────")
+    print(ehr_summary(steps, total_days))
 
-    print("\n🧮 TOTAL PILLS NEEDED:")
-    pill_summary = summarize_total_pills(plan)
-    for strength, total in pill_summary.items():
-        print(f"Diazepam {strength} mg: {int(round(total))} tablets")
+    print("\n💊  PHARMACY ORDERS\n────────────────")
+    for o in pharmacy_orders(steps):
+        print(f"{o['date']}\n  {o['product']}\n  {o['sig']}\n  {o['disp']}\n")
+
+    print("🧮  TOTAL PILLS NEEDED\n────────────────────")
+    for strg, n in pill_totals(steps).items():
+        print(f"Diazepam {strg} mg: {n} tablets")
+
+if __name__ == "__main__":
+    main()
