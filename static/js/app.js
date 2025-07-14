@@ -100,6 +100,17 @@ async function handleFormSubmit(event) {
 }
 
 function displayResults(result) {
+    // Display warning if present
+    const warningAlert = document.getElementById('warningAlert');
+    const warningMessage = document.getElementById('warningMessage');
+    
+    if (result.warning) {
+        warningMessage.textContent = result.warning;
+        warningAlert.style.display = 'block';
+    } else {
+        warningAlert.style.display = 'none';
+    }
+    
     // Display patient instructions
     const patientInstructions = document.getElementById('patientInstructions');
     patientInstructions.innerHTML = result.patient_instructions.map(line => 
@@ -187,6 +198,8 @@ function hideResults() {
     const results = document.getElementById('results');
     results.style.display = 'none';
     results.classList.remove('fade-in');
+    // Also hide warning alert
+    document.getElementById('warningAlert').style.display = 'none';
 }
 
 function showError(message) {

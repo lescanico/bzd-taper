@@ -40,7 +40,7 @@ def generate_taper():
             }), 400
         
         # Generate taper plan
-        plan, total_days = create_bzd_taper_plan(
+        plan, total_days, warning = create_bzd_taper_plan(
             starting_medication=starting_medication,
             starting_dose_mg=starting_dose,
             taper_speed=taper_speed,
@@ -62,7 +62,8 @@ def generate_taper():
             'patient_instructions': patient_instructions,
             'ehr_summary': ehr_summary,
             'pharmacy_orders': pharmacy_orders,
-            'pill_summary': pill_summary
+            'pill_summary': pill_summary,
+            'warning': warning
         })
         
     except Exception as e:

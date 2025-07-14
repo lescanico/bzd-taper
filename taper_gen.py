@@ -101,56 +101,84 @@ def generate_percent_taper_schedule(
     start_date=date.today(),
     dosing_frequency="auto",
 ):
-    percent = TAPER_SPEEDS[taper_speed]["percent"]
-    interval_days = TAPER_SPEEDS[taper_speed]["interval_days"]
-
-    schedule = []
-    current_dose = diazepam_dose_mg
-    current_day = 1
-    current_date = start_date
-    week_number = 1
-    step_count = 0
+    # Define possible taper speeds and intervals for auto-adjustment
+    speed_options = [
+        {"percent": 2.5, "interval_days": 28, "label": "slow"},
+        {"percent": 5.0, "interval_days": 21, "label": "standard"},
+        {"percent": 10.0, "interval_days": 14, "label": "fast"},
+        {"percent": 15.0, "interval_days": 14, "label": "very fast"},
+        {"percent": 20.0, "interval_days": 7, "label": "ultra fast"},
+    ]
+    # Start with the requested speed
+    initial_speed = next((s for s in speed_options if s["label"] == taper_speed), speed_options[1])
+    speed_idx = speed_options.index(initial_speed)
     max_steps = 50  # Prevent runaway schedules
-    try:
-        while current_dose > min_dose_mg:
-            step_count += 1
-            if step_count > max_steps:
-                raise ValueError(f"Taper schedule would take more than {max_steps} steps. Try a faster taper speed or increase the minimum dose.")
-            # Proactive date overflow check
-            max_days = (datetime.date.max - current_date).days
-            if (interval_days - 1) > max_days:
-                raise ValueError("Taper schedule end date exceeds supported range. Please check input parameters (dose, speed, or start date). Try a faster taper, higher minimum dose, or later start date.")
-            dose = round(current_dose, 2)
-            dosing_schedule, actual_freq = split_dose(dose, frequency=dosing_frequency)
-            end_date = current_date + timedelta(days=interval_days - 1)
-            step = {
-                "dose_mg": dose,
-                "duration_days": interval_days,
-                "start_day": current_day,
-                "end_day": current_day + interval_days - 1,
-                "start_date": current_date,
-                "end_date": end_date,
-                "week_label": f"Weeks {week_number}–{week_number + (interval_days // 7) - 1}",
-                "dosing_frequency": actual_freq,
-                "dosing_schedule": dosing_schedule,
-            }
-            schedule.append(step)
-            reduction = current_dose * (percent / 100)
-            current_dose = max(current_dose - reduction, min_dose_mg)
-            current_dose = round(round_to * round(current_dose / round_to), 2)
-            current_day += interval_days
-            # Proactive date overflow check for next step
-            max_days_next = (datetime.date.max - current_date).days
-            if interval_days > max_days_next:
-                raise ValueError("Taper schedule date increment exceeds supported range. Please check input parameters (dose, speed, or start date). Try a faster taper, higher minimum dose, or later start date.")
-            current_date = current_date + timedelta(days=interval_days)
-            if current_date.year > 2100:
-                raise ValueError("Taper schedule exceeds year 2100. Please check input parameters.")
-            week_number += (interval_days // 7)
-    except (OverflowError, ValueError):
-        raise ValueError("Taper schedule date calculation exceeds supported range. Please check input parameters (dose, speed, or start date). Try a higher starting dose, faster taper, or earlier start date.")
-
+    warning = None
+    while speed_idx < len(speed_options):
+        percent = speed_options[speed_idx]["percent"]
+        interval_days = speed_options[speed_idx]["interval_days"]
+        schedule = []
+        current_dose = diazepam_dose_mg
+        current_day = int(1)
+        current_date = start_date
+        week_number = int(1)
+        step_count = 0
+        try:
+            while current_dose > min_dose_mg:
+                step_count += 1
+                if step_count > max_steps:
+                    raise ValueError(f"Taper schedule would take more than {max_steps} steps.")
+                # Proactive date overflow check
+                max_days = (datetime.date.max - current_date).days
+                if (interval_days - 1) > max_days:
+                    raise ValueError("Taper schedule end date exceeds supported range.")
+                dose = round(current_dose, 2)
+                dosing_schedule, actual_freq = split_dose(dose, frequency=dosing_frequency)
+                end_date = current_date + timedelta(days=interval_days - 1)
+                step = {
+                    "dose_mg": dose,
+                    "duration_days": interval_days,
+                    "start_day": current_day,
+                    "end_day": current_day + interval_days - 1,
+                    "start_date": current_date,
+                    "end_date": end_date,
+                    "week_label": f"Weeks {int(week_number)}–{int(week_number + int(interval_days // 7) - 1)}",
+                    "dosing_frequency": actual_freq,
+                    "dosing_schedule": dosing_schedule,
+                }
+                schedule.append(step)
+                reduction = current_dose * (percent / 100)
+                current_dose = max(current_dose - reduction, min_dose_mg)
+                current_dose = round(round_to * round(current_dose / round_to), 2)
+                current_day += int(interval_days)
+                # Proactive date overflow check for next step
+                max_days_next = (datetime.date.max - current_date).days
+                if interval_days > max_days_next:
+                    raise ValueError("Taper schedule date increment exceeds supported range.")
+                current_date = current_date + timedelta(days=interval_days)
+                if current_date.year > 2100:
+                    raise ValueError("Taper schedule exceeds year 2100.")
+                week_number += int(interval_days // 7)
+                week_number = int(week_number)
+            # If we get here, the schedule fits within max_steps
+            break
+        except ValueError as e:
+            if "more than" in str(e):
+                # Try next faster speed
+                speed_idx += 1
+                warning = f"Taper speed was automatically increased to '{speed_options[speed_idx-1]['label']}' to keep the schedule realistic (≤{max_steps} steps)."
+                continue
+            else:
+                raise e
+    else:
+        # If all speeds fail, use the fastest and warn
+        warning = f"Could not fit taper within {max_steps} steps, used fastest schedule ('{speed_options[-1]['label']}')."
+    # Final step (same as before)
     final_schedule, actual_freq = split_dose(min_dose_mg, frequency=dosing_frequency)
+    # Check date overflow for final step
+    max_days_final = (datetime.date.max - current_date).days
+    if (interval_days - 1) > max_days_final:
+        raise ValueError("Final taper step would exceed supported date range.")
     schedule.append({
         "dose_mg": min_dose_mg,
         "duration_days": interval_days,
@@ -159,16 +187,19 @@ def generate_percent_taper_schedule(
         "start_date": current_date,
         "end_date": current_date + timedelta(days=interval_days - 1),
         "note": "final daily dose",
-        "week_label": f"Weeks {week_number}–{week_number + (interval_days // 7) - 1}",
+        "week_label": f"Weeks {int(week_number)}–{int(week_number + int(interval_days // 7) - 1)}",
         "dosing_frequency": actual_freq,
         "dosing_schedule": final_schedule,
     })
-
-    current_day += interval_days
+    current_day += int(interval_days)
     current_date += timedelta(days=interval_days)
-    week_number += (interval_days // 7)
-
+    week_number += int(interval_days // 7)
+    week_number = int(week_number)
     if final_hold_days and final_hold_frequency_days:
+        # Check date overflow for final hold
+        max_days_hold = (datetime.date.max - current_date).days
+        if (final_hold_days - 1) > max_days_hold:
+            raise ValueError("Final hold period would exceed supported date range.")
         schedule.append({
             "dose_mg": min_dose_mg,
             "duration_days": final_hold_days,
@@ -178,13 +209,12 @@ def generate_percent_taper_schedule(
             "start_date": current_date,
             "end_date": current_date + timedelta(days=final_hold_days - 1),
             "note": f"final hold every {final_hold_frequency_days} days",
-            "week_label": f"Weeks {week_number}–{week_number + (final_hold_days // 7)}",
+            "week_label": f"Weeks {int(week_number)}–{int(week_number + int(final_hold_days // 7))}",
             "dosing_frequency": actual_freq,
             "dosing_schedule": final_schedule,
         })
-
     total_days = schedule[-1]["end_day"]
-    return schedule, total_days
+    return schedule, total_days, warning
 
 
 def create_bzd_taper_plan(starting_medication, starting_dose_mg, taper_speed,
@@ -200,7 +230,7 @@ def create_bzd_taper_plan(starting_medication, starting_dose_mg, taper_speed,
     else:
         converted_dose = starting_dose_mg
 
-    taper_schedule, total_days = generate_percent_taper_schedule(
+    taper_schedule, total_days, warning = generate_percent_taper_schedule(
         diazepam_dose_mg=converted_dose,
         taper_speed=taper_speed,
         round_to=round_to,
@@ -210,7 +240,7 @@ def create_bzd_taper_plan(starting_medication, starting_dose_mg, taper_speed,
         dosing_frequency=dosing_frequency
     )
 
-    return taper_schedule, total_days
+    return taper_schedule, total_days, warning
 
 
 def format_patient_instructions(schedule):
@@ -270,7 +300,7 @@ def summarize_total_pills(schedule):
 
 
 if __name__ == "__main__":
-    plan, duration = create_bzd_taper_plan(
+    plan, duration, warning = create_bzd_taper_plan(
         starting_medication="clonazepam",
         starting_dose_mg=1.0,
         taper_speed="slow",
@@ -279,6 +309,9 @@ if __name__ == "__main__":
         start_date=date(2025, 7, 15),
         dosing_frequency="auto"
     )
+
+    if warning:
+        print(f"\n⚠️  {warning}")
 
     print("\n🧑‍⚕️ PATIENT INSTRUCTIONS:")
     for line in format_patient_instructions(plan):
