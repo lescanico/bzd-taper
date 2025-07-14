@@ -1,8 +1,11 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
 from datetime import date
+import os
 from taper_gen import convert_to_diazepam, generate_schedule, patient_instructions, ehr_summary, pharmacy_orders, pill_totals
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='frontend/build', static_url_path='')
+CORS(app)
 
 @app.route("/taper", methods=["POST"])
 def taper():
@@ -40,8 +43,12 @@ def taper():
     })
 
 @app.route("/")
-def index():
-    return "Benzodiazepine Taper Generator API"
+def serve():
+    return send_from_directory(app.static_folder, 'index.html')
+
+@app.route("/<path:path>")
+def static_proxy(path):
+    return send_from_directory(app.static_folder, path)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000) 

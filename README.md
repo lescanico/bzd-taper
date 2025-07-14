@@ -10,8 +10,45 @@ A Python tool for generating diazepam-based taper schedules that comply with the
 - Optional final hold periods
 - Generates pharmacy orders and pill counts
 - Web API for integration
+- **NEW**: Beautiful React frontend with modern UI
+
+## Quick Start
+
+### Development
+
+1. Install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. Install Node.js dependencies:
+   ```bash
+   cd frontend && npm install
+   ```
+
+3. Run both frontend and backend:
+   ```bash
+   ./dev.sh
+   ```
+
+   Or run them separately:
+   ```bash
+   # Backend (port 10000)
+   python app.py
+   
+   # Frontend (port 3000)
+   cd frontend && npm start
+   ```
+
+### Production
+
+The app is automatically deployed to Render.com with the included `render.yaml` configuration.
 
 ## Usage
+
+### Web Interface
+
+Visit the React frontend at `http://localhost:3000` (development) or your deployed URL for a beautiful, user-friendly interface.
 
 ### Command Line
 
@@ -51,9 +88,37 @@ POST to `/taper` with JSON:
 - **very fast**: 15% reduction every 14 days
 - **ultra fast**: 20% reduction every 7 days
 
+## Frontend Features
+
+- 🎨 Modern, responsive UI with Tailwind CSS
+- 📱 Works on desktop, tablet, and mobile
+- ⚡ Real-time form validation
+- 🎭 Smooth animations and transitions
+- 🖨️ Print functionality for schedules
+- 📊 Detailed results display
+
+## Tech Stack
+
+### Backend
+- Python 3.8+
+- Flask
+- Flask-CORS
+
+### Frontend
+- React 18 with TypeScript
+- Tailwind CSS
+- Framer Motion
+- React Hook Form with Zod validation
+- Lucide React icons
+
 ## Deployment
 
-This project is configured for deployment on Render.com with the included `render.yaml` file.
+This project is configured for deployment on Render.com with the included `render.yaml` file. The build process automatically:
+
+1. Installs Python dependencies
+2. Installs Node.js dependencies  
+3. Builds the React frontend
+4. Serves the built files from Flask
 
 ## License
 
