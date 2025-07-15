@@ -33,7 +33,6 @@ yarn-debug.log*
 yarn-error.log*
 
 # React build
-frontend/build/
 frontend/.env.local
 frontend/.env.development.local
 frontend/.env.test.local
