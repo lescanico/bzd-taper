@@ -132,6 +132,8 @@ function App() {
           : undefined,
       };
 
+      console.log('Submitting payload:', payload);
+
       const response = await fetch('/taper', {
         method: 'POST',
         headers: {
@@ -140,14 +142,20 @@ function App() {
         body: JSON.stringify(payload),
       });
 
+      console.log('Response status:', response.status);
+      console.log('Response ok:', response.ok);
+
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('API Error:', errorData);
         throw new Error(errorData.error || 'Failed to generate taper schedule');
       }
 
       const resultData = await response.json();
+      console.log('API Success:', resultData);
       setResult(resultData);
     } catch (err) {
+      console.error('Form submission error:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
