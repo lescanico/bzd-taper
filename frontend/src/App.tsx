@@ -29,12 +29,11 @@ interface TaperResult {
 const formSchema = z.object({
   med: z.string().min(1, 'Medication is required'),
   dosing_frequency: z.enum(['once', 'bid', 'tid']),
-  am_dose: z.string().min(1, 'AM dose is required').refine((val) => !isNaN(Number(val)) && Number(val) >= 0, {
-    message: 'AM dose must be a non-negative number'
+  total_daily_dose: z.string().min(1, 'Total daily dose is required').refine((val) => !isNaN(Number(val)) && Number(val) >= 0, {
+    message: 'Total daily dose must be a non-negative number'
   }),
-  pm_dose: z.string().min(1, 'PM dose is required').refine((val) => !isNaN(Number(val)) && Number(val) >= 0, {
-    message: 'PM dose must be a non-negative number'
-  }),
+  am_dose: z.string().optional(),
+  pm_dose: z.string().optional(),
   hs_dose: z.string().optional(),
   speed: z.enum(['slow', 'standard', 'fast', 'very fast', 'ultra fast']),
   start: z.string().min(1, 'Start date is required'),
@@ -83,7 +82,8 @@ function App() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       med: 'alprazolam',
-      dosing_frequency: 'bid',
+      dosing_frequency: 'once',
+      total_daily_dose: '',
       am_dose: '',
       pm_dose: '',
       hs_dose: '',
@@ -96,12 +96,15 @@ function App() {
   const finalHoldDays = watch('final_hold_days');
   const finalHoldEvery = watch('final_hold_every');
   const dosingFrequency = watch('dosing_frequency');
-  const amDose = watch('am_dose');
-  const pmDose = watch('pm_dose');
-  const hsDose = watch('hs_dose');
+  const totalDailyDose = watch('total_daily_dose');
+  const amDose = watch('am_dose') || '0';
+  const pmDose = watch('pm_dose') || '0';
+  const hsDose = watch('hs_dose') || '0';
 
-  // Calculate total daily dose
-  const totalDailyDose = (parseFloat(amDose || '0') + parseFloat(pmDose || '0') + parseFloat(hsDose || '0')).toFixed(1);
+  // Calculate total daily dose for BID/TID
+  const calculatedTotalDose = dosingFrequency === 'once' 
+    ? totalDailyDose 
+    : (parseFloat(amDose) + parseFloat(pmDose) + parseFloat(hsDose)).toFixed(1);
 
   const onSubmit = async (data: FormData) => {
     setLoading(true);
@@ -110,20 +113,34 @@ function App() {
 
     try {
       // Calculate total daily dose
-      const amDose = parseFloat(data.am_dose) || 0;
-      const pmDose = parseFloat(data.pm_dose) || 0;
-      const hsDose = parseFloat(data.hs_dose || '0') || 0;
-      const totalDose = amDose + pmDose + hsDose;
+      let totalDose: number;
+      let dosingSchedule: any;
 
-      const payload = {
-        med: data.med,
-        dose: totalDose,
-        dosing_schedule: {
+      if (data.dosing_frequency === 'once') {
+        totalDose = parseFloat(data.total_daily_dose || '0');
+        dosingSchedule = {
+          frequency: data.dosing_frequency,
+          am: 0,
+          pm: 0,
+          hs: totalDose,
+        };
+      } else {
+        const amDose = parseFloat(data.am_dose || '0');
+        const pmDose = parseFloat(data.pm_dose || '0');
+        const hsDose = parseFloat(data.hs_dose || '0');
+        totalDose = amDose + pmDose + hsDose;
+        dosingSchedule = {
           frequency: data.dosing_frequency,
           am: amDose,
           pm: pmDose,
           hs: hsDose,
-        },
+        };
+      }
+
+      const payload = {
+        med: data.med,
+        dose: totalDose,
+        dosing_schedule: dosingSchedule,
         speed: data.speed,
         start: data.start,
         available_strengths: data.available_strengths,
@@ -273,39 +290,62 @@ function App() {
                 )}
               </div>
 
-              {/* AM Dose */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Morning Dose (mg)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  {...register('am_dose')}
-                  className="input-field"
-                  placeholder="e.g., 1.0"
-                />
-                {errors.am_dose && (
-                  <p className="mt-1 text-sm text-red-600">{errors.am_dose.message}</p>
-                )}
-              </div>
+              {/* Total Daily Dose (for once daily) */}
+              {dosingFrequency === 'once' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Total Daily Dose (mg)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    {...register('total_daily_dose')}
+                    className="input-field"
+                    placeholder="e.g., 3.0"
+                  />
+                  {errors.total_daily_dose && (
+                    <p className="mt-1 text-sm text-red-600">{errors.total_daily_dose.message}</p>
+                  )}
+                </div>
+              )}
 
-              {/* PM Dose */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Afternoon/Evening Dose (mg)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  {...register('pm_dose')}
-                  className="input-field"
-                  placeholder="e.g., 2.0"
-                />
-                {errors.pm_dose && (
-                  <p className="mt-1 text-sm text-red-600">{errors.pm_dose.message}</p>
-                )}
-              </div>
+              {/* AM Dose (for BID/TID) */}
+              {dosingFrequency !== 'once' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Morning Dose (mg)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    {...register('am_dose')}
+                    className="input-field"
+                    placeholder="e.g., 1.0"
+                  />
+                  {errors.am_dose && (
+                    <p className="mt-1 text-sm text-red-600">{errors.am_dose.message}</p>
+                  )}
+                </div>
+              )}
+
+              {/* PM Dose (for BID/TID) */}
+              {dosingFrequency !== 'once' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Afternoon/Evening Dose (mg)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    {...register('pm_dose')}
+                    className="input-field"
+                    placeholder="e.g., 2.0"
+                  />
+                  {errors.pm_dose && (
+                    <p className="mt-1 text-sm text-red-600">{errors.pm_dose.message}</p>
+                  )}
+                </div>
+              )}
 
               {/* HS Dose (only for TID) */}
               {dosingFrequency === 'tid' && (
@@ -327,12 +367,14 @@ function App() {
               )}
 
               {/* Total Daily Dose Display */}
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-blue-800">Total Daily Dose:</span>
-                  <span className="text-lg font-bold text-blue-900">{totalDailyDose} mg</span>
+              {dosingFrequency !== 'once' && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-blue-800">Total Daily Dose:</span>
+                    <span className="text-lg font-bold text-blue-900">{calculatedTotalDose} mg</span>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Available Tablet Strengths */}
               <div>
