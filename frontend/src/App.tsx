@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { 
@@ -78,6 +78,7 @@ function App() {
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors },
     watch,
   } = useForm<FormData>({
@@ -385,18 +386,34 @@ function App() {
                 </label>
                 <div className="grid grid-cols-1 gap-2">
                   {availableDiazepamStrengths.map((strength) => (
-                    <label key={strength.value} className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
-                      <input
-                        type="checkbox"
-                        value={strength.value.toString()}
-                        {...register('available_strengths')}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                      />
-                      <div className="ml-3 flex items-center">
-                        <Pill className="w-4 h-4 text-gray-500 mr-2" />
-                        <span className="text-sm font-medium text-gray-700">{strength.label}</span>
-                      </div>
-                    </label>
+                    <Controller
+                      key={strength.value}
+                      name="available_strengths"
+                      control={control}
+                      render={({ field }) => (
+                        <label className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
+                          <input
+                            type="checkbox"
+                            value={strength.value.toString()}
+                            checked={field.value?.includes(strength.value.toString())}
+                            onChange={(e) => {
+                              const value = strength.value.toString();
+                              const currentValues = field.value || [];
+                              if (e.target.checked) {
+                                field.onChange([...currentValues, value]);
+                              } else {
+                                field.onChange(currentValues.filter((v: string) => v !== value));
+                              }
+                            }}
+                            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          />
+                          <div className="ml-3 flex items-center">
+                            <Pill className="w-4 h-4 text-gray-500 mr-2" />
+                            <span className="text-sm font-medium text-gray-700">{strength.label}</span>
+                          </div>
+                        </label>
+                      )}
+                    />
                   ))}
                 </div>
                 {errors.available_strengths && (
