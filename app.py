@@ -30,16 +30,20 @@ def taper():
     else:
         diaz = dose
 
-    # Update available strengths if provided
+    # Update available strengths if provided (do this BEFORE generate_schedule)
     if available_strengths:
         from taper_gen import AVAILABLE_STRENGTHS
         AVAILABLE_STRENGTHS["diazepam"] = available_strengths
+
+    # Get frequency from dosing schedule, default to "auto" if not specified
+    freq = dosing_schedule.get("frequency", "auto")
 
     steps, total_days, warn = generate_schedule(
         diazepam_start_mg=diaz,
         speed=speed,
         start=date.fromisoformat(start),
         final_hold=tuple(final_hold) if final_hold else None,
+        freq=freq,  # Pass the frequency parameter
     )
 
     return jsonify({
@@ -52,11 +56,11 @@ def taper():
 
 @app.route("/")
 def serve():
-    return send_from_directory(app.static_folder, 'index.html')
+    return send_from_directory(app.static_folder or 'frontend/build', 'index.html')
 
 @app.route("/<path:path>")
 def static_proxy(path):
-    return send_from_directory(app.static_folder, path)
+    return send_from_directory(app.static_folder or 'frontend/build', path)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000) 
