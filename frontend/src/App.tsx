@@ -95,6 +95,13 @@ function App() {
 
   const finalHoldDays = watch('final_hold_days');
   const finalHoldEvery = watch('final_hold_every');
+  const dosingFrequency = watch('dosing_frequency');
+  const amDose = watch('am_dose');
+  const pmDose = watch('pm_dose');
+  const hsDose = watch('hs_dose');
+
+  // Calculate total daily dose
+  const totalDailyDose = (parseFloat(amDose || '0') + parseFloat(pmDose || '0') + parseFloat(hsDose || '0')).toFixed(1);
 
   const onSubmit = async (data: FormData) => {
     setLoading(true);
@@ -293,43 +300,59 @@ function App() {
               </div>
 
               {/* HS Dose (only for TID) */}
-              <div className="hidden">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Bedtime Dose (mg)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  {...register('hs_dose')}
-                  className="input-field"
-                  placeholder="e.g., 1.0"
-                />
-                {errors.hs_dose && (
-                  <p className="mt-1 text-sm text-red-600">{errors.hs_dose.message}</p>
-                )}
+              {dosingFrequency === 'tid' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Bedtime Dose (mg)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    {...register('hs_dose')}
+                    className="input-field"
+                    placeholder="e.g., 1.0"
+                  />
+                  {errors.hs_dose && (
+                    <p className="mt-1 text-sm text-red-600">{errors.hs_dose.message}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Total Daily Dose Display */}
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-blue-800">Total Daily Dose:</span>
+                  <span className="text-lg font-bold text-blue-900">{totalDailyDose} mg</span>
+                </div>
               </div>
 
               {/* Available Tablet Strengths */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-3">
                   Available Diazepam Tablet Strengths
                 </label>
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 gap-2">
                   {availableDiazepamStrengths.map((strength) => (
-                    <label key={strength.value} className="flex items-center">
+                    <label key={strength.value} className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
                       <input
                         type="checkbox"
                         value={strength.value}
                         {...register('available_strengths')}
                         className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                       />
-                      <span className="ml-2 text-sm text-gray-700">{strength.label}</span>
+                      <div className="ml-3 flex items-center">
+                        <Pill className="w-4 h-4 text-gray-500 mr-2" />
+                        <span className="text-sm font-medium text-gray-700">{strength.label}</span>
+                      </div>
                     </label>
                   ))}
                 </div>
                 {errors.available_strengths && (
                   <p className="mt-1 text-sm text-red-600">{errors.available_strengths.message}</p>
                 )}
+                <p className="text-xs text-gray-500 mt-2">
+                  Select the tablet strengths available to you for the taper
+                </p>
               </div>
 
               {/* Speed */}
