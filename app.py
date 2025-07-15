@@ -12,6 +12,9 @@ def taper():
     data = request.get_json(force=True) or {}
     med = data.get("med")
     dose = data.get("dose")
+    dosing_schedule = data.get("dosing_schedule", {})
+    available_strengths = data.get("available_strengths", [10.0, 5.0, 2.0])
+    
     if med is None or dose is None:
         return jsonify({"error": "'med' and 'dose' are required fields."}), 400
     try:
@@ -26,6 +29,11 @@ def taper():
         diaz = convert_to_diazepam(dose, med)
     else:
         diaz = dose
+
+    # Update available strengths if provided
+    if available_strengths:
+        from taper_gen import AVAILABLE_STRENGTHS
+        AVAILABLE_STRENGTHS["diazepam"] = available_strengths
 
     steps, total_days, warn = generate_schedule(
         diazepam_start_mg=diaz,

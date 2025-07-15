@@ -136,7 +136,7 @@ def generate_schedule(
     diazepam_start_mg: float,
     speed: str,
     *,
-    min_mg: float = 0.5,
+    min_mg: float = 2.0,
     round_to: float = 0.5,
     final_hold: Tuple[int, int] | None = None,
     start: date = date.today(),
@@ -227,8 +227,9 @@ def patient_instructions(steps: List[TaperStep]) -> List[str]:
 
 
 def ehr_summary(steps: List[TaperStep], total_days: int) -> str:
+    final_dose = steps[-1].dose_mg if steps else 0
     return (f"Diazepam taper: {len(steps)} steps over {total_days} days, "
-            f"ending at 0.5 mg daily (Feb 28 2025 guideline). Ref: {ASAM_GUIDELINE_URL}")
+            f"ending at {final_dose} mg daily (Feb 28 2025 guideline). Ref: {ASAM_GUIDELINE_URL}")
 
 
 def pharmacy_orders(steps: List[TaperStep]) -> List[Dict[str, str]]:

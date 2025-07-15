@@ -28,13 +28,19 @@ interface TaperResult {
 // Form schema
 const formSchema = z.object({
   med: z.string().min(1, 'Medication is required'),
-  dose: z.string().min(1, 'Dose is required').refine((val) => !isNaN(Number(val)) && Number(val) > 0, {
-    message: 'Dose must be a positive number'
+  dosing_frequency: z.enum(['once', 'bid', 'tid']),
+  am_dose: z.string().min(1, 'AM dose is required').refine((val) => !isNaN(Number(val)) && Number(val) >= 0, {
+    message: 'AM dose must be a non-negative number'
   }),
+  pm_dose: z.string().min(1, 'PM dose is required').refine((val) => !isNaN(Number(val)) && Number(val) >= 0, {
+    message: 'PM dose must be a non-negative number'
+  }),
+  hs_dose: z.string().optional(),
   speed: z.enum(['slow', 'standard', 'fast', 'very fast', 'ultra fast']),
   start: z.string().min(1, 'Start date is required'),
   final_hold_days: z.string().optional(),
   final_hold_every: z.string().optional(),
+  available_strengths: z.array(z.number()).min(1, 'Select at least one tablet strength'),
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -57,6 +63,12 @@ const speeds = [
   { value: 'ultra fast', label: 'Ultra Fast (20% every 7 days)' },
 ];
 
+const availableDiazepamStrengths = [
+  { value: 10.0, label: '10 mg' },
+  { value: 5.0, label: '5 mg' },
+  { value: 2.0, label: '2 mg' },
+];
+
 function App() {
   const [result, setResult] = useState<TaperResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -71,9 +83,13 @@ function App() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       med: 'alprazolam',
-      dose: '',
+      dosing_frequency: 'bid',
+      am_dose: '',
+      pm_dose: '',
+      hs_dose: '',
       speed: 'standard',
       start: new Date().toISOString().split('T')[0],
+      available_strengths: [10.0, 5.0, 2.0],
     },
   });
 
@@ -86,11 +102,24 @@ function App() {
     setResult(null);
 
     try {
+      // Calculate total daily dose
+      const amDose = parseFloat(data.am_dose) || 0;
+      const pmDose = parseFloat(data.pm_dose) || 0;
+      const hsDose = parseFloat(data.hs_dose || '0') || 0;
+      const totalDose = amDose + pmDose + hsDose;
+
       const payload = {
         med: data.med,
-        dose: parseFloat(data.dose),
+        dose: totalDose,
+        dosing_schedule: {
+          frequency: data.dosing_frequency,
+          am: amDose,
+          pm: pmDose,
+          hs: hsDose,
+        },
         speed: data.speed,
         start: data.start,
+        available_strengths: data.available_strengths,
         final_hold: finalHoldDays && finalHoldEvery 
           ? [parseInt(finalHoldDays), parseInt(finalHoldEvery)]
           : undefined,
@@ -211,20 +240,95 @@ function App() {
                 )}
               </div>
 
-              {/* Dose */}
+              {/* Dosing Frequency */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Current Dose (mg)
+                  Dosing Frequency
+                </label>
+                <select
+                  {...register('dosing_frequency')}
+                  className="input-field"
+                >
+                  <option value="once">Once daily</option>
+                  <option value="bid">Twice daily (BID)</option>
+                  <option value="tid">Three times daily (TID)</option>
+                </select>
+                {errors.dosing_frequency && (
+                  <p className="mt-1 text-sm text-red-600">{errors.dosing_frequency.message}</p>
+                )}
+              </div>
+
+              {/* AM Dose */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Morning Dose (mg)
                 </label>
                 <input
                   type="number"
                   step="0.1"
-                  {...register('dose')}
+                  {...register('am_dose')}
                   className="input-field"
                   placeholder="e.g., 1.0"
                 />
-                {errors.dose && (
-                  <p className="mt-1 text-sm text-red-600">{errors.dose.message}</p>
+                {errors.am_dose && (
+                  <p className="mt-1 text-sm text-red-600">{errors.am_dose.message}</p>
+                )}
+              </div>
+
+              {/* PM Dose */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Afternoon/Evening Dose (mg)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  {...register('pm_dose')}
+                  className="input-field"
+                  placeholder="e.g., 2.0"
+                />
+                {errors.pm_dose && (
+                  <p className="mt-1 text-sm text-red-600">{errors.pm_dose.message}</p>
+                )}
+              </div>
+
+              {/* HS Dose (only for TID) */}
+              <div className="hidden">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Bedtime Dose (mg)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  {...register('hs_dose')}
+                  className="input-field"
+                  placeholder="e.g., 1.0"
+                />
+                {errors.hs_dose && (
+                  <p className="mt-1 text-sm text-red-600">{errors.hs_dose.message}</p>
+                )}
+              </div>
+
+              {/* Available Tablet Strengths */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Available Diazepam Tablet Strengths
+                </label>
+                <div className="space-y-2">
+                  {availableDiazepamStrengths.map((strength) => (
+                    <label key={strength.value} className="flex items-center">
+                      <input
+                        type="checkbox"
+                        value={strength.value}
+                        {...register('available_strengths')}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="ml-2 text-sm text-gray-700">{strength.label}</span>
+                    </label>
+                  ))}
+                </div>
+                {errors.available_strengths && (
+                  <p className="mt-1 text-sm text-red-600">{errors.available_strengths.message}</p>
                 )}
               </div>
 
