@@ -39,10 +39,12 @@ const formSchema = z.object({
   start: z.string().min(1, 'Start date is required'),
   final_hold_days: z.string().optional(),
   final_hold_every: z.string().optional(),
-  available_strengths: z.array(z.number()).min(1, 'Select at least one tablet strength'),
+  available_strengths: z.array(z.string()).min(1, 'Select at least one tablet strength'),
 });
 
-type FormData = z.infer<typeof formSchema>;
+type FormData = Omit<z.infer<typeof formSchema>, 'available_strengths'> & {
+  available_strengths: string[]; // converted to number[] on submit
+};
 
 const medications = [
   { value: 'alprazolam', label: 'Alprazolam (Xanax)' },
@@ -89,7 +91,7 @@ function App() {
       hs_dose: '',
       speed: 'standard',
       start: new Date().toISOString().split('T')[0],
-      available_strengths: [10.0, 5.0, 2.0],
+      available_strengths: ["10.0", "5.0", "2.0"],
     },
   });
 
@@ -143,7 +145,7 @@ function App() {
         dosing_schedule: dosingSchedule,
         speed: data.speed,
         start: data.start,
-        available_strengths: data.available_strengths,
+        available_strengths: data.available_strengths.map(Number),
         final_hold: finalHoldDays && finalHoldEvery 
           ? [parseInt(finalHoldDays), parseInt(finalHoldEvery)]
           : undefined,
@@ -386,7 +388,7 @@ function App() {
                     <label key={strength.value} className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
                       <input
                         type="checkbox"
-                        value={strength.value}
+                        value={strength.value.toString()}
                         {...register('available_strengths')}
                         className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                       />
